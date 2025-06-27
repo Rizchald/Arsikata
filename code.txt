@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bilingual AI Tutor - Arsi</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts for a nice, clean font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Custom styles */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        #chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        #chat-messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: #4a5568 #2d3748;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center h-screen">
+
+    <div id="api-key-modal" class="absolute inset-0 bg-gray-900 bg-opacity-90 flex items-center justify-center z-50">
+        <div class="bg-gray-800 p-8 rounded-2xl shadow-2xl w-full max-w-md text-center">
+            <h2 class="text-2xl font-bold mb-4">Enter Your API Key</h2>
+            <p class="text-gray-400 mb-6">Please get your API key from Google AI Studio and paste it below to start.</p>
+            <input type="password" id="api-key-input" class="w-full bg-gray-700 text-white p-3 rounded-lg border-2 border-gray-600 focus:border-purple-500 focus:outline-none" placeholder="Paste your Google API Key here...">
+            <button id="start-chat-btn" class="mt-6 w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300">Start Session</button>
+             <p class="text-xs text-gray-500 mt-4">You can get your key from Google AI Studio under "Get API key".</p>
+        </div>
+    </div>
+    
+    <div id="app-container" class="w-full h-full max-w-4xl mx-auto flex flex-col bg-gray-800 shadow-2xl rounded-2xl hidden">
+        <!-- Header -->
+        <header class="bg-gray-900/50 backdrop-blur-sm p-4 border-b border-gray-700 flex items-center justify-between rounded-t-2xl">
+            <div class="flex items-center space-x-4">
+                 <div class="w-12 h-12 bg-purple-600 rounded-full flex items-center justify-center text-xl font-bold">A</div>
+                 <div>
+                    <h1 class="text-xl font-bold">Arsi</h1>
+                    <p class="text-sm text-green-400 flex items-center"><span class="w-2 h-2 bg-green-400 rounded-full mr-2"></span>Online</p>
+                </div>
+            </div>
+        </header>
+        
+        <!-- Chat Area -->
+        <div id="chat-container" class="p-6">
+            <div id="chat-messages" class="space-y-6">
+                <!-- Messages will be injected here by JavaScript -->
+            </div>
+        </div>
+        
+        <!-- Input Area -->
+        <footer class="p-4 mt-auto border-t border-gray-700">
+             <div id="loading-indicator" class="text-center text-gray-400 mb-2 hidden">
+                <p>Arsi is typing...</p>
+            </div>
+            <div class="flex items-center bg-gray-700 rounded-xl p-2">
+                <input type="text" id="user-input" class="flex-grow bg-transparent text-white placeholder-gray-400 focus:outline-none px-4" placeholder="Type your message to Arsi...">
+                <button id="send-btn" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-5 rounded-lg transition duration-300 ml-2">Send</button>
+            </div>
+        </footer>
+    </div>
+
+    <script type="module">
+        // --- CONFIGURATION ---
+        const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=";
+        let API_KEY = "";
+
+        // --- BILINGUAL SYSTEM INSTRUCTION (TEXT-ONLY) ---
+        const systemInstruction = `You are "Arsi", a friendly, patient, and highly effective bilingual AI tutor. You are fluent in both English and Bahasa Indonesia. Your primary goal is to help me practice and improve my skills in both languages through natural conversation.
+
+Your core instructions are:
+1.  **Language Detection & Response:** Automatically detect the language I am using (English or Indonesian) and respond in the same language to maintain a smooth conversation.
+2.  **Act as a Bilingual Conversation Partner:** Engage me in a conversation about a topic I choose, in either English or Bahasa Indonesia.
+3.  **Delayed Correction Method:** If I make a mistake in either English or Indonesian, DO NOT interrupt. Wait until I finish my thought. Then, gently provide a correction using this exact format:
+    * **You said:** [Quote my incorrect sentence here]
+    * **A better way to say it is:** [Provide the corrected, more natural sentence]
+    * **Quick Tip:** [Briefly explain the grammar rule or reason for the correction in the language we are currently speaking]
+4.  **Vocabulary & Translation:** If asked, you can translate words or phrases between the two languages. You can also introduce relevant new vocabulary in context.
+5.  **Maintain Your Persona:** Always be encouraging, positive, and patient. Never be judgmental.
+6.  **Initiate the Session:** Start our first interaction by introducing yourself as Arsi in both English and Indonesian, and then ask me which language I'd like to start with.`;
+
+        // --- DOM ELEMENTS ---
+        const apiKeyModal = document.getElementById('api-key-modal');
+        const appContainer = document.getElementById('app-container');
+        const apiKeyInput = document.getElementById('api-key-input');
+        const startChatBtn = document.getElementById('start-chat-btn');
+        const chatMessages = document.getElementById('chat-messages');
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+        const loadingIndicator = document.getElementById('loading-indicator');
+
+        // --- STATE MANAGEMENT ---
+        let conversationHistory = [];
+
+        // --- EVENT LISTENERS ---
+        startChatBtn.addEventListener('click', () => {
+            const key = apiKeyInput.value.trim();
+            if (key) {
+                API_KEY = key;
+                apiKeyModal.classList.add('hidden');
+                appContainer.classList.remove('hidden');
+                initiateChat();
+            } else {
+                alert('Please enter a valid API Key.');
+            }
+        });
+
+        sendBtn.addEventListener('click', sendMessage);
+
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        // --- FUNCTIONS ---
+        async function initiateChat() {
+            conversationHistory.push({
+                 role: "user",
+                 parts: [{ text: "Hello, please introduce yourself as instructed." }]
+            });
+            await getAIResponse();
+        }
+
+        async function sendMessage() {
+            const messageText = userInput.value.trim();
+            if (!messageText) return;
+
+            addMessageToUI('user', messageText);
+            userInput.value = '';
+            
+            conversationHistory.push({
+                role: "user",
+                parts: [{ text: messageText }]
+            });
+
+            await getAIResponse();
+        }
+
+        async function getAIResponse() {
+            loadingIndicator.classList.remove('hidden');
+            sendBtn.disabled = true;
+
+            const payload = {
+                contents: conversationHistory,
+                systemInstruction: { parts: [{ text: systemInstruction }] },
+            };
+
+            try {
+                const response = await fetch(`${API_URL}${API_KEY}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+
+                if (!response.ok) {
+                    const errorBody = await response.text();
+                    throw new Error(`API Error: ${response.status} ${response.statusText} - ${errorBody}`);
+                }
+
+                const data = await response.json();
+                
+                if (data.candidates && data.candidates.length > 0) {
+                    const aiMessage = data.candidates[0].content.parts[0].text;
+
+                    conversationHistory.push({
+                        role: "model",
+                        parts: [{ text: aiMessage }] 
+                    });
+                    
+                    addMessageToUI('model', aiMessage);
+
+                } else {
+                     const errorMessage = "Sorry, I couldn't generate a response. This might be due to a safety filter. Please try rephrasing your message.";
+                     addMessageToUI('model', errorMessage);
+                     conversationHistory.pop();
+                }
+            } catch (error) {
+                console.error("Error fetching AI response:", error);
+                addMessageToUI('model', `An error occurred: ${error.message}`);
+            } finally {
+                loadingIndicator.classList.add('hidden');
+                sendBtn.disabled = false;
+                userInput.focus();
+            }
+        }
+        
+        function addMessageToUI(role, text) {
+            const messageDiv = document.createElement('div');
+            let formattedText = text
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/\n/g, '<br>');
+            
+            if (role === 'user') {
+                messageDiv.className = "flex justify-end";
+                messageDiv.innerHTML = `<div class="bg-purple-600 p-4 rounded-2xl rounded-br-none max-w-lg">
+                                            <p>${formattedText}</p>
+                                        </div>`;
+            } else { // 'model' for Arsi
+                messageDiv.className = "flex justify-start";
+                messageDiv.innerHTML = `<div class="flex items-start space-x-3">
+                                            <div class="w-10 h-10 bg-purple-600 rounded-full flex items-center justify-center font-bold flex-shrink-0 mt-1">A</div>
+                                            <div class="bg-gray-700 p-4 rounded-2xl rounded-bl-none max-w-lg">
+                                                <p>${formattedText}</p>
+                                            </div>
+                                        </div>`;
+            }
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+    </script>
+</body>
+</html>
